@@ -67,13 +67,17 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # La acción oficial enmascara el token en los logs y cierra la sesión
+      # de Docker al terminar el job.
+      - name: Iniciar sesión en ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
       - name: Leer el repositorio de ECR desde Parameter Store
         id: ecr
         run: |
           repo=$(aws ssm get-parameter --name "/$PROJECT/ecr/repository-url" \
             --query Parameter.Value --output text)
           echo "image=$repo:$GITHUB_SHA" >> "$GITHUB_OUTPUT"
-          aws ecr get-login-password | docker login --username AWS --password-stdin "${repo%%/*}"
 
       # Los tags de ECR son inmutables: si la imagen de este commit ya existe
       # (por ejemplo, al re-ejecutar el workflow), no se vuelve a construir.
