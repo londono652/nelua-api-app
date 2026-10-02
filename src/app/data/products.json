@@ -1,0 +1,14 @@
+[
+  {"id": 1, "name": "Audífonos inalámbricos", "category": "electronica", "price": 189900, "currency": "COP", "stock": 120},
+  {"id": 2, "name": "Teclado mecánico", "category": "electronica", "price": 249900, "currency": "COP", "stock": 45},
+  {"id": 3, "name": "Monitor 27 pulgadas", "category": "electronica", "price": 899900, "currency": "COP", "stock": 18},
+  {"id": 4, "name": "Cargador USB-C 65W", "category": "electronica", "price": 99900, "currency": "COP", "stock": 300},
+  {"id": 5, "name": "Silla ergonómica", "category": "hogar", "price": 649900, "currency": "COP", "stock": 22},
+  {"id": 6, "name": "Lámpara de escritorio LED", "category": "hogar", "price": 79900, "currency": "COP", "stock": 85},
+  {"id": 7, "name": "Cafetera de goteo", "category": "hogar", "price": 159900, "currency": "COP", "stock": 40},
+  {"id": 8, "name": "Morral para portátil", "category": "accesorios", "price": 129900, "currency": "COP", "stock": 150},
+  {"id": 9, "name": "Botella térmica 750 ml", "category": "accesorios", "price": 59900, "currency": "COP", "stock": 200},
+  {"id": 10, "name": "Tenis para correr", "category": "deportes", "price": 329900, "currency": "COP", "stock": 60},
+  {"id": 11, "name": "Mancuernas ajustables", "category": "deportes", "price": 419900, "currency": "COP", "stock": 15},
+  {"id": 12, "name": "Tapete de yoga", "category": "deportes", "price": 69900, "currency": "COP", "stock": 0}
+]
