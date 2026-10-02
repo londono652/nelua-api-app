@@ -15,14 +15,22 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH"
 
-# Usuario sin privilegios: el contenedor nunca corre como root.
-RUN groupadd --system --gid 10001 app \
+# Aplica los parches de seguridad del sistema operativo publicados después
+# de la imagen base, y crea un usuario sin privilegios: el contenedor nunca
+# corre como root.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid app --no-create-home app
 
 COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /app
 COPY src/ .
+# Garantiza que el usuario sin privilegios pueda leer el código, sin importar
+# los permisos con los que venían los archivos en la máquina que construye.
+RUN chmod -R a+rX /app
 
 # La versión se inyecta al construir (el pipeline usa el SHA del commit)
 # y la API la expone en /healthz.
