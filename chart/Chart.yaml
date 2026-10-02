@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nelua-api
+description: API de catálogo de productos (FastAPI)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

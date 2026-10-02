@@ -1,0 +1,159 @@
+name: app
+
+# Pull request  -> solo pruebas.
+# Push a main   -> pruebas, imagen, staging y (con aprobación) prod.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Evita dos despliegues simultáneos de la misma rama.
+concurrency:
+  group: app-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+  PROJECT: nelua-api
+
+jobs:
+  test:
+    name: Lint y pruebas
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Instalar dependencias
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Pruebas (pytest)
+        run: pytest -q
+
+      - name: Validar el chart de Helm
+        run: helm lint chart
+
+  build:
+    name: Imagen (build, escaneo y push)
+    needs: test
+    if: github.event_name != 'pull_request'
+    # Runner ARM: construye la imagen arm64 de forma nativa (nodos Graviton).
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      id-token: write # necesario para autenticarse en AWS por OIDC
+      contents: read
+    outputs:
+      image_tag: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Autenticarse en AWS (OIDC, sin llaves)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Leer el repositorio de ECR desde Parameter Store
+        id: ecr
+        run: |
+          repo=$(aws ssm get-parameter --name "/$PROJECT/ecr/repository-url" \
+            --query Parameter.Value --output text)
+          echo "image=$repo:$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          aws ecr get-login-password | docker login --username AWS --password-stdin "${repo%%/*}"
+
+      # Los tags de ECR son inmutables: si la imagen de este commit ya existe
+      # (por ejemplo, al re-ejecutar el workflow), no se vuelve a construir.
+      - name: Verificar si la imagen ya existe
+        id: exists
+        run: |
+          if aws ecr describe-images --repository-name "$PROJECT" \
+              --image-ids imageTag="$GITHUB_SHA" >/dev/null 2>&1; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Construir la imagen
+        if: steps.exists.outputs.found == 'false'
+        run: docker build --build-arg APP_VERSION="$GITHUB_SHA" -t "${{ steps.ecr.outputs.image }}" .
+
+      # Bloquea el pipeline si hay vulnerabilidades altas o críticas con corrección disponible.
+      - name: Escanear la imagen (Trivy)
+        if: steps.exists.outputs.found == 'false'
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.75.0 image \
+            --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+            "${{ steps.ecr.outputs.image }}"
+
+      - name: Publicar la imagen en ECR
+        if: steps.exists.outputs.found == 'false'
+        run: docker push "${{ steps.ecr.outputs.image }}"
+
+  deploy-staging:
+    name: Desplegar en staging
+    needs: build
+    # Interruptor: los despliegues se activan cuando la plataforma está encendida.
+    if: vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    environment: staging
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.3.0
+
+      - name: Desplegar y verificar
+        run: bash scripts/deploy.sh staging "${{ needs.build.outputs.image_tag }}"
+
+      - uses: grafana/setup-k6-action@v1
+
+      - name: Prueba de humo con carga ligera (k6)
+        run: k6 run -e BASE_URL="https://api-staging.nelua.site" load-tests/smoke.js
+
+  deploy-prod:
+    name: Desplegar en prod
+    needs: [build, deploy-staging]
+    runs-on: ubuntu-24.04
+    # El environment "prod" exige aprobación manual antes de ejecutar este job.
+    environment: prod
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.3.0
+
+      - name: Desplegar y verificar
+        run: bash scripts/deploy.sh prod "${{ needs.build.outputs.image_tag }}"
